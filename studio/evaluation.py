@@ -144,6 +144,9 @@ def run_comparison(request: RunRequest, settings=None, client=None):
         }
         if request.provider == "openai"
         else None,
+        "implementation_sha256": hashlib.sha256(
+            b"".join(f.name.encode() + f.read_bytes() for f in sorted((ROOT / "studio").glob("*.py")))
+        ).hexdigest(),
         "scorer_version": "strict-v1",
         "config": request.model_dump(),
         "pipelines": {},
