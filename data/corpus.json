@@ -1,0 +1,242 @@
+[
+  {
+    "id": "access-01",
+    "document": "Access handbook",
+    "page": 1,
+    "text": "The security team approves every production service account."
+  },
+  {
+    "id": "access-02",
+    "document": "Access handbook",
+    "page": 1,
+    "text": "Production service account credentials must rotate every 90 days."
+  },
+  {
+    "id": "access-03",
+    "document": "Access handbook",
+    "page": 2,
+    "text": "Contractor access is revoked within four hours of the recorded end date."
+  },
+  {
+    "id": "access-04",
+    "document": "Access handbook",
+    "page": 2,
+    "text": "Access audit records are retained for 365 days."
+  },
+  {
+    "id": "access-05",
+    "document": "Access handbook",
+    "page": 3,
+    "text": "Production access requires hardware backed multifactor authentication."
+  },
+  {
+    "id": "access-06",
+    "document": "Access handbook",
+    "page": 3,
+    "text": "Emergency access expires after two hours unless security renews it."
+  },
+  {
+    "id": "access-07",
+    "document": "Access handbook",
+    "page": 4,
+    "text": "Resource owners review access permissions every quarter."
+  },
+  {
+    "id": "access-08",
+    "document": "Access handbook",
+    "page": 4,
+    "text": "Application secrets belong in the managed secret vault, never in source control."
+  },
+  {
+    "id": "support-01",
+    "document": "Support operations",
+    "page": 1,
+    "text": "Critical incidents must be acknowledged within 15 minutes."
+  },
+  {
+    "id": "support-02",
+    "document": "Support operations",
+    "page": 1,
+    "text": "Critical incident status updates are sent every 30 minutes."
+  },
+  {
+    "id": "support-03",
+    "document": "Support operations",
+    "page": 2,
+    "text": "The on call incident commander coordinates critical incidents."
+  },
+  {
+    "id": "support-04",
+    "document": "Support operations",
+    "page": 2,
+    "text": "The incident review is due within three business days after resolution."
+  },
+  {
+    "id": "support-05",
+    "document": "Support operations",
+    "page": 3,
+    "text": "Standard support requests receive an initial response within eight business hours."
+  },
+  {
+    "id": "support-06",
+    "document": "Support operations",
+    "page": 3,
+    "text": "Customer incident updates are published on the public status page."
+  },
+  {
+    "id": "support-07",
+    "document": "Support operations",
+    "page": 4,
+    "text": "Standard support operates Monday through Friday from 09:00 to 17:00 UTC."
+  },
+  {
+    "id": "support-08",
+    "document": "Support operations",
+    "page": 4,
+    "text": "An incident review includes the timeline, contributing factors, and assigned follow up actions."
+  },
+  {
+    "id": "releases-01",
+    "document": "Release policy",
+    "page": 1,
+    "text": "A production deployment requires approval from two maintainers."
+  },
+  {
+    "id": "releases-02",
+    "document": "Release policy",
+    "page": 1,
+    "text": "The regular production release window is Tuesday from 14:00 to 16:00 UTC."
+  },
+  {
+    "id": "releases-03",
+    "document": "Release policy",
+    "page": 2,
+    "text": "The release is rolled back when its error rate exceeds two percent for five minutes."
+  },
+  {
+    "id": "releases-04",
+    "document": "Release policy",
+    "page": 2,
+    "text": "A canary deployment is observed for 20 minutes before full rollout."
+  },
+  {
+    "id": "releases-05",
+    "document": "Release policy",
+    "page": 3,
+    "text": "The change author cannot act as the only release approver."
+  },
+  {
+    "id": "releases-06",
+    "document": "Release policy",
+    "page": 3,
+    "text": "A verified database backup and a tested recovery procedure are required before migration."
+  },
+  {
+    "id": "releases-07",
+    "document": "Release policy",
+    "page": 4,
+    "text": "Emergency deployments require one incident commander approval and a review the next business day."
+  },
+  {
+    "id": "releases-08",
+    "document": "Release policy",
+    "page": 4,
+    "text": "Deployment logs are retained for 180 days."
+  },
+  {
+    "id": "travel-01",
+    "document": "Travel guidelines",
+    "page": 1,
+    "text": "The domestic hotel reimbursement limit is 180 dollars per night before tax."
+  },
+  {
+    "id": "travel-02",
+    "document": "Travel guidelines",
+    "page": 1,
+    "text": "The international hotel reimbursement limit is 240 dollars per night before tax."
+  },
+  {
+    "id": "travel-03",
+    "document": "Travel guidelines",
+    "page": 2,
+    "text": "Domestic flights should be booked at least 14 days before departure."
+  },
+  {
+    "id": "travel-04",
+    "document": "Travel guidelines",
+    "page": 2,
+    "text": "Travel expense claims are due within 30 days after the trip ends."
+  },
+  {
+    "id": "travel-05",
+    "document": "Travel guidelines",
+    "page": 3,
+    "text": "The department director approves international business travel."
+  },
+  {
+    "id": "travel-06",
+    "document": "Travel guidelines",
+    "page": 3,
+    "text": "The daily meal allowance for domestic trips is 65 dollars."
+  },
+  {
+    "id": "travel-07",
+    "document": "Travel guidelines",
+    "page": 4,
+    "text": "An itemized receipt is required for each expense above 25 dollars."
+  },
+  {
+    "id": "travel-08",
+    "document": "Travel guidelines",
+    "page": 4,
+    "text": "Employees pay all incremental costs of personal extensions to a work trip."
+  },
+  {
+    "id": "retention-01",
+    "document": "Data retention policy",
+    "page": 1,
+    "text": "Customer support transcripts are retained for 180 days after case closure."
+  },
+  {
+    "id": "retention-02",
+    "document": "Data retention policy",
+    "page": 1,
+    "text": "Deleted customer data may remain in encrypted backups for up to 35 days."
+  },
+  {
+    "id": "retention-03",
+    "document": "Data retention policy",
+    "page": 2,
+    "text": "The privacy officer approves exceptions to data retention limits."
+  },
+  {
+    "id": "retention-04",
+    "document": "Data retention policy",
+    "page": 2,
+    "text": "A legal hold suspends normal deletion for the affected records."
+  },
+  {
+    "id": "retention-05",
+    "document": "Data retention policy",
+    "page": 3,
+    "text": "Anonymized usage aggregates are retained for 24 months."
+  },
+  {
+    "id": "retention-06",
+    "document": "Data retention policy",
+    "page": 3,
+    "text": "An approved deletion request is processed within 30 calendar days."
+  },
+  {
+    "id": "retention-07",
+    "document": "Data retention policy",
+    "page": 4,
+    "text": "The data governance team owns the retention inventory."
+  },
+  {
+    "id": "retention-08",
+    "document": "Data retention policy",
+    "page": 4,
+    "text": "An approved purpose and an access review are required before exporting customer data."
+  }
+]

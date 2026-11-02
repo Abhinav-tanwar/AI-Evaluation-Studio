@@ -1,0 +1,13 @@
+.venv/
+.env
+node_modules/
+frontend/dist/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+runtime/
+mlruns/
+mlartifacts/
+.taste-skill/
+*.egg-info/
+.DS_Store
