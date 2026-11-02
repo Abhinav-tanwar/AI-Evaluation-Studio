@@ -11,3 +11,5 @@ mlartifacts/
 .taste-skill/
 *.egg-info/
 .DS_Store
+
+*.tsbuildinfo

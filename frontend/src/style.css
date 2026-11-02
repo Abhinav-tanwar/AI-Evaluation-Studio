@@ -1097,3 +1097,24 @@ textarea:focus-visible {
 .rail {
   padding-bottom: env(safe-area-inset-bottom);
 }
+
+@media (max-width: 640px) {
+  .rail > .connection {
+    display: inline-flex !important;
+    margin: 0 8px 0 0;
+    min-width: 44px;
+  }
+  .rail nav {
+    flex: 1;
+    padding-inline: 0;
+  }
+  .rail nav button {
+    min-width: 72px;
+  }
+  .brandmark {
+    display: none !important;
+  }
+  .runbar > button {
+    margin-left: 0;
+  }
+}

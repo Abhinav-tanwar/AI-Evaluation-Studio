@@ -1,0 +1,7 @@
+{
+  "container_build": "passed",
+  "postgresql_evaluation": "passed",
+  "history_after_restart": "passed",
+  "candidate_exact_match": 0.9,
+  "provider": "reference"
+}

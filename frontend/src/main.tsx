@@ -423,6 +423,7 @@ function App() {
                     }
                   }}
                 >
+                  <Activity aria-hidden="true" size={14} />
                   Log to MLflow
                 </button>
                 <button onClick={exportRun} disabled={!b}>
