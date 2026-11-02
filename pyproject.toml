@@ -1,0 +1,10 @@
+[project]
+name = "ai-evaluation-studio"
+version = "1.0.0"
+requires-python = ">=3.12"
+description = "Reproducible RAG evaluation, experiment comparison, and regression gates."
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+[tool.ruff]
+line-length = 110

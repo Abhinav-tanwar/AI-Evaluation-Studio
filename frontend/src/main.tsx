@@ -1,0 +1,1012 @@
+import React, { useEffect, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import {
+  Activity,
+  ArrowLeft,
+  ArrowUpRight,
+  Check,
+  ChevronRight,
+  Database,
+  Download,
+  FlaskConical,
+  History,
+  KeyRound,
+  Play,
+  X,
+} from "lucide-react";
+import "./style.css";
+
+type Config = {
+  name: string;
+  retriever: "overlap" | "bm25";
+  top_k: number;
+  threshold: number;
+};
+type Row = {
+  case_id: string;
+  question: string;
+  category: string;
+  expected_answer: string;
+  expected_sources: string[];
+  output: { answer: string; citations: string[]; abstained: boolean } | null;
+  retrieved: {
+    id: string;
+    text: string;
+    document: string;
+    page: number;
+    score: number;
+  }[];
+  scores: Record<string, number | string[] | null>;
+  latency_ms: number;
+  error: string | null;
+};
+type Metric = {
+  cases: number;
+  passed: number;
+  errors: number;
+  exact_match: number;
+  retrieval_recall: number | null;
+  abstention_correct: number | null;
+  citation_valid: number | null;
+  verbatim_support: number | null;
+  median_latency_ms: number;
+  p95_latency_ms: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  estimated_cost_usd: number | null;
+};
+type Run = {
+  id: string;
+  name: string;
+  created_at: string;
+  status: string;
+  provider: string;
+  split: string;
+  dataset_sha256?: string;
+  revision?: string;
+  working_tree_dirty?: boolean;
+  scorer_version?: string;
+  error?: string;
+  config: { baseline: Config; candidate: Config };
+  pipelines?: Record<string, { name: string; metrics: Metric; rows: Row[] }>;
+  gate?: { passed: boolean; checks: { name: string; passed: boolean }[] };
+  reviews?: { case_id: string; verdict: string; note: string }[];
+};
+type Case = {
+  id: string;
+  question: string;
+  split: string;
+  category: string;
+  expected_answer: string;
+  expected_sources: string[];
+};
+const defaults = {
+  baseline: {
+    name: "Token overlap",
+    retriever: "overlap",
+    top_k: 1,
+    threshold: 0.25,
+  },
+  candidate: {
+    name: "BM25 retrieval",
+    retriever: "bm25",
+    top_k: 3,
+    threshold: 0.45,
+  },
+} as { baseline: Config; candidate: Config };
+const pct = (v: number | null | undefined) =>
+  v == null ? "Not measured" : `${(v * 100).toFixed(1)}%`;
+const num = (v: number | null | undefined, unit = "") =>
+  v == null
+    ? "Not measured"
+    : `${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}${unit}`;
+function App() {
+  const [token, setToken] = useState(""),
+    [connection, setConnection] = useState(false),
+    [page, setPage] = useState("experiments");
+  const [runs, setRuns] = useState<Run[]>([]),
+    [run, setRun] = useState<Run | null>(null),
+    [cases, setCases] = useState<Case[]>([]),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false);
+  const [health, setHealth] = useState({
+      live_inference_enabled: false,
+      tracking_enabled: false,
+    }),
+    [name, setName] = useState("Overlap vs BM25"),
+    [split, setSplit] = useState("development"),
+    [provider, setProvider] = useState("reference");
+  const [configs, setConfigs] = useState(defaults),
+    [selected, setSelected] = useState<Row | null>(null),
+    [filter, setFilter] = useState("failures"),
+    [query, setQuery] = useState(""),
+    [note, setNote] = useState(""),
+    [verdict, setVerdict] = useState("needs review"),
+    [message, setMessage] = useState(""),
+    [trackingMessage, setTrackingMessage] = useState("");
+  const configDialog = useRef<HTMLDialogElement>(null),
+    detailDialog = useRef<HTMLDialogElement>(null),
+    tokenDialog = useRef<HTMLDialogElement>(null);
+  async function api(path: string, options: RequestInit = {}) {
+    const res = await fetch("/api" + path, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: "Bearer " + token } : {}),
+        ...options.headers,
+      },
+    });
+    if (!res.ok) {
+      let text = "Request failed";
+      try {
+        text = (await res.json()).detail || text;
+      } catch {}
+      throw new Error(
+        typeof text === "string" ? text : "Check the submitted configuration.",
+      );
+    }
+    return res.json();
+  }
+  async function load() {
+    try {
+      const [h, list, data] = await Promise.all([
+        api("/health"),
+        api("/runs"),
+        api("/benchmark"),
+      ]);
+      setHealth(h);
+      setRuns(list);
+      setCases(data.cases);
+      setConnection(true);
+      setError("");
+      if (list.length && !run) {
+        setRun(await api("/runs/" + list[0].id));
+      }
+    } catch (e) {
+      setConnection(false);
+      setError(String((e as Error).message));
+    }
+  }
+  useEffect(() => {
+    load();
+  }, [token]);
+  useEffect(() => {
+    if (!run || !["queued", "running"].includes(run.status)) return;
+    const timer = setInterval(async () => {
+      try {
+        const fresh = await api("/runs/" + run.id);
+        setRun(fresh);
+        if (!["queued", "running"].includes(fresh.status)) {
+          setBusy(false);
+          setRuns(await api("/runs"));
+        }
+      } catch (e) {
+        setError((e as Error).message);
+        setBusy(false);
+      }
+    }, 1200);
+    return () => clearInterval(timer);
+  }, [run?.id, run?.status, token]);
+  const a = run?.pipelines?.baseline,
+    b = run?.pipelines?.candidate;
+  const rows = b?.rows || [];
+  const failures = rows.filter((r) => !r.scores.exact_match);
+  const shown = rows.filter(
+    (r) =>
+      (filter === "all" || !r.scores.exact_match) &&
+      `${r.question} ${r.category} ${r.case_id}`
+        .toLowerCase()
+        .includes(query.toLowerCase()),
+  );
+  const delta =
+    a && b
+      ? Math.round((b.metrics.exact_match - a.metrics.exact_match) * 1000) / 10
+      : 0;
+  async function start(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const next = await api("/runs", {
+        method: "POST",
+        body: JSON.stringify({ name, split, provider, ...configs }),
+      });
+      setRun(next);
+      setRuns((previous) => [next, ...previous]);
+      setTrackingMessage("");
+      setPage("experiments");
+      configDialog.current?.close();
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+  async function choose(id: string) {
+    try {
+      setRun(await api("/runs/" + id));
+      setPage("experiments");
+      setQuery("");
+      setFilter("failures");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function review(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selected || !run) return;
+    try {
+      await api("/runs/" + run.id + "/reviews", {
+        method: "POST",
+        body: JSON.stringify({ case_id: selected.case_id, verdict, note }),
+      });
+      setRun(await api("/runs/" + run.id));
+      setMessage("Review saved separately from automated scores.");
+    } catch (e) {
+      setMessage((e as Error).message);
+    }
+  }
+  function openRow(row: Row) {
+    setSelected(row);
+    const existing = run?.reviews?.find((r) => r.case_id === row.case_id);
+    setVerdict(existing?.verdict || "needs review");
+    setNote(existing?.note || "");
+    setMessage("");
+    detailDialog.current?.showModal();
+  }
+  async function exportRun() {
+    if (!run) return;
+    try {
+      const result = await api("/runs/" + run.id + "/export");
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(result, null, 2)], {
+          type: "application/json",
+        }),
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `evaluation-${run.id}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  const metrics = [
+    { key: "exact_match", label: "Exact answer match" },
+    { key: "retrieval_recall", label: "Expected source recall" },
+    { key: "abstention_correct", label: "Correct abstention" },
+    { key: "verbatim_support", label: "Verbatim citation support" },
+  ];
+  return (
+    <>
+      <a href="#main" className="skip">
+        Skip to workspace
+      </a>
+      <aside className="rail">
+        <a className="brandmark" href="#main" aria-label="AI Evaluation Studio">
+          <span></span>
+          <span></span>
+          <span></span>
+        </a>
+        <nav aria-label="Workspace">
+          <button
+            className={page === "experiments" ? "active" : ""}
+            onClick={() => setPage("experiments")}
+            title="Experiments"
+          >
+            <FlaskConical aria-hidden="true" />
+            <span>Experiments</span>
+          </button>
+          <button
+            className={page === "dataset" ? "active" : ""}
+            onClick={() => setPage("dataset")}
+            title="Benchmark"
+          >
+            <Database aria-hidden="true" />
+            <span>Benchmark</span>
+          </button>
+          <button
+            className={page === "history" ? "active" : ""}
+            onClick={() => setPage("history")}
+            title="History"
+          >
+            <History aria-hidden="true" />
+            <span>History</span>
+          </button>
+        </nav>
+        <button
+          className="connection"
+          title="Connection settings"
+          onClick={() => tokenDialog.current?.showModal()}
+          aria-label="Connection settings"
+        >
+          <KeyRound aria-hidden="true" />
+        </button>
+      </aside>
+      <div className="workspace">
+        <header>
+          <div className="identity">
+            <strong>AI Evaluation Studio</strong>
+            <span className="divider">/</span>
+            <span>Northstar policies</span>
+          </div>
+          <div className="status">
+            <i className={connection ? "online" : ""} />
+            {connection ? "Local workspace" : "Connection unavailable"}
+          </div>
+        </header>
+        <main id="main">
+          <div className="pagehead">
+            <div>
+              <div className="breadcrumb">
+                Workspace <ChevronRight aria-hidden="true" size={12} />
+                {page === "experiments"
+                  ? "Experiment comparison"
+                  : page === "dataset"
+                    ? "Benchmark library"
+                    : "Experiment history"}
+              </div>
+              <h1>
+                {page === "experiments"
+                  ? "Did the candidate improve?"
+                  : page === "dataset"
+                    ? "A benchmark you can inspect."
+                    : "Every experiment, recorded."}
+              </h1>
+              <p>
+                {page === "experiments"
+                  ? a && b
+                    ? `${delta > 0 ? "+" : ""}${delta.toFixed(1)} percentage points in exact match. ${failures.length} candidate cases need inspection.`
+                    : "Compare two configurations on the same versioned questions."
+                  : page === "dataset"
+                    ? "50 authored questions, five fictional policy documents, and explicit reference annotations."
+                    : "Configurations, dataset fingerprints, and per case evidence stay with each run."}
+              </p>
+            </div>
+            <button
+              className="primary"
+              onClick={() => configDialog.current?.showModal()}
+              disabled={!connection || busy}
+            >
+              <Play aria-hidden="true" size={14} />
+              {busy ? "Evaluation running" : "New comparison"}
+            </button>
+          </div>
+          {trackingMessage && <p role="status">{trackingMessage}</p>}
+          {error && (
+            <div className="alert" role="alert">
+              <strong>Unable to complete request.</strong> {error}{" "}
+              <button onClick={load}>Retry connection</button>
+            </div>
+          )}
+          {page === "experiments" && (
+            <>
+              <div className="runbar">
+                <div>
+                  <span className="small">Selected experiment</span>
+                  <select
+                    aria-label="Select experiment"
+                    value={run?.id || ""}
+                    onChange={(e) => choose(e.target.value)}
+                  >
+                    <option value="" disabled>
+                      No experiment selected
+                    </option>
+                    {runs.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name} · {r.split}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="runmeta">
+                  <span>
+                    {run?.provider === "openai"
+                      ? "Live OpenAI inference"
+                      : "Reference adapter · no model calls"}
+                  </span>
+                  <span>{run?.split || "No run yet"}</span>
+                </div>
+                <button
+                  disabled={!b || !health.tracking_enabled}
+                  title="Requires MLFLOW_TRACKING_URI"
+                  onClick={async () => {
+                    try {
+                      const result = await api(`/runs/${run?.id}/tracking`, {
+                        method: "POST",
+                      });
+                      setTrackingMessage(
+                        `MLflow run saved: ${result.tracking_run_id}`,
+                      );
+                    } catch (e) {
+                      setError((e as Error).message);
+                    }
+                  }}
+                >
+                  <Activity aria-hidden="true" size={14} />
+                  Log to MLflow
+                </button>
+                <button onClick={exportRun} disabled={!b}>
+                  <Download aria-hidden="true" size={14} />
+                  Export JSON
+                </button>
+              </div>
+              {run && ["queued", "running"].includes(run.status) && (
+                <div className="empty" role="status">
+                  <Activity aria-hidden="true" />
+                  Evaluating both configurations. Results appear when the run
+                  completes.
+                </div>
+              )}
+              {run?.status === "failed" && (
+                <div className="empty" role="alert">
+                  {run.error}
+                </div>
+              )}
+              {!run && (
+                <div className="empty">
+                  <FlaskConical aria-hidden="true" />
+                  <h2>No experiments yet</h2>
+                  <p>
+                    Start with the local reference adapter. It uses the real
+                    retrieval and scoring pipeline without API charges.
+                  </p>
+                  <button onClick={() => configDialog.current?.showModal()}>
+                    Configure a comparison{" "}
+                    <ArrowUpRight aria-hidden="true" size={14} />
+                  </button>
+                </div>
+              )}
+              {a && b && (
+                <>
+                  <section className="summary">
+                    <div>
+                      <span className="small">
+                        Candidate exact answer match
+                      </span>
+                      <div className="leadfigure">
+                        {pct(b.metrics.exact_match)}
+                        <span>
+                          {b.metrics.passed} / {b.metrics.cases} cases
+                        </span>
+                      </div>
+                      <p>
+                        {a.name}: {pct(a.metrics.exact_match)}{" "}
+                        <span className="change">
+                          {delta > 0 ? "+" : ""}
+                          {delta.toFixed(1)} pp
+                        </span>
+                      </p>
+                    </div>
+                    <div>
+                      <span className="small">Candidate p95</span>
+                      <strong>{num(b.metrics.p95_latency_ms, " ms")}</strong>
+                      <p>End to end adapter time</p>
+                    </div>
+                    <div>
+                      <span className="small">Provider cost estimate</span>
+                      <strong>
+                        {b.metrics.estimated_cost_usd == null
+                          ? "Unknown"
+                          : `$${b.metrics.estimated_cost_usd.toFixed(4)}`}
+                      </strong>
+                      <p>
+                        {run?.provider === "reference"
+                          ? "No provider calls made"
+                          : "From usage and configured rates"}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="small">Regression gate</span>
+                      <strong className="gate-label">
+                        {run?.gate?.passed ? (
+                          <Check aria-hidden="true" size={18} />
+                        ) : (
+                          <X aria-hidden="true" size={18} />
+                        )}{" "}
+                        {run?.gate?.passed ? "Pass" : "Review required"}
+                      </strong>
+                      <p>
+                        {run?.gate?.checks.filter((c) => c.passed).length} /{" "}
+                        {run?.gate?.checks.length} checks passed
+                      </p>
+                    </div>
+                  </section>
+                  <div className="analysis-grid">
+                    <section className="panel quality">
+                      <div className="sectionhead">
+                        <h2>Quality comparison</h2>
+                        <div className="legend">
+                          <span>
+                            <i />
+                            Baseline
+                          </span>
+                          <span>
+                            <i className="amber" />
+                            Candidate
+                          </span>
+                        </div>
+                      </div>
+                      <div className="chart-scale">
+                        <span>0%</span>
+                        <span>50%</span>
+                        <span>100%</span>
+                      </div>
+                      <div className="chart">
+                        {metrics.map((m) => (
+                          <div className="chartrow" key={m.key}>
+                            <span>{m.label}</span>
+                            <div
+                              className="track"
+                              role="img"
+                              aria-label={`${m.label}: baseline ${pct(a.metrics[m.key as keyof Metric] as number)}, candidate ${pct(b.metrics[m.key as keyof Metric] as number)}`}
+                            >
+                              <div className="gridline middle" />
+                              <div
+                                className="comparison-line"
+                                style={{
+                                  left: `${Math.min((a.metrics[m.key as keyof Metric] as number) || 0, (b.metrics[m.key as keyof Metric] as number) || 0) * 100}%`,
+                                  width: `${Math.abs(((b.metrics[m.key as keyof Metric] as number) || 0) - ((a.metrics[m.key as keyof Metric] as number) || 0)) * 100}%`,
+                                }}
+                              />
+                              <i
+                                className="point base"
+                                style={{
+                                  left: `${((a.metrics[m.key as keyof Metric] as number) || 0) * 100}%`,
+                                }}
+                              />
+                              <i
+                                className="point candidate"
+                                style={{
+                                  left: `${((b.metrics[m.key as keyof Metric] as number) || 0) * 100}%`,
+                                }}
+                              />
+                            </div>
+                            <b>
+                              {pct(b.metrics[m.key as keyof Metric] as number)}
+                            </b>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="caption">
+                        Strict reference checks. Citation support measures
+                        copied source text, not semantic faithfulness.
+                      </p>
+                    </section>
+                    <section className="panel gates">
+                      <div className="sectionhead">
+                        <h2>Release checks</h2>
+                        <span className="small">strict v1</span>
+                      </div>
+                      {run?.gate?.checks.map((c) => (
+                        <div className="checkrow" key={c.name}>
+                          {c.passed ? (
+                            <Check aria-hidden="true" size={15} />
+                          ) : (
+                            <X aria-hidden="true" size={15} />
+                          )}
+                          <span>{c.name}</span>
+                          <b>{c.passed ? "Pass" : "Fail"}</b>
+                        </div>
+                      ))}
+                      <details>
+                        <summary>View experiment provenance</summary>
+                        <p>
+                          Dataset SHA256
+                          <br />
+                          <code>{run?.dataset_sha256}</code>
+                        </p>
+                        <p>
+                          Source commit
+                          <br />
+                          <code>{run?.revision}</code>
+                          {run?.working_tree_dirty &&
+                            " · modified working tree"}
+                        </p>
+                        <p>
+                          Provider: {run?.provider}. Scores are descriptive;
+                          this small synthetic benchmark establishes no general
+                          accuracy guarantee.
+                        </p>
+                      </details>
+                    </section>
+                  </div>
+                  <section className="panel cases">
+                    <div className="sectionhead">
+                      <div>
+                        <h2>
+                          Case explorer{" "}
+                          <span className="count">{shown.length}</span>
+                        </h2>
+                        <p>Inspect the evidence behind every result.</p>
+                      </div>
+                      <div className="casecontrols">
+                        <div
+                          className="tabs"
+                          role="group"
+                          aria-label="Case filter"
+                        >
+                          <button
+                            className={filter === "failures" ? "selected" : ""}
+                            onClick={() => setFilter("failures")}
+                          >
+                            Failures ({failures.length})
+                          </button>
+                          <button
+                            className={filter === "all" ? "selected" : ""}
+                            onClick={() => setFilter("all")}
+                          >
+                            All cases
+                          </button>
+                        </div>
+                        <input
+                          aria-label="Search cases"
+                          placeholder="Search questions…"
+                          value={query}
+                          onChange={(e) => setQuery(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="case-table">
+                      <div className="tablehead">
+                        <span>Question</span>
+                        <span>Exact match</span>
+                        <span>Source recall</span>
+                        <span>Latency</span>
+                        <span />
+                      </div>
+                      {shown.map((r) => (
+                        <button
+                          className="caserow"
+                          key={r.case_id}
+                          onClick={() => openRow(r)}
+                        >
+                          <span>
+                            <small>
+                              {r.case_id} · {r.category}
+                            </small>
+                            <span>{r.question}</span>
+                          </span>
+                          <b>{r.scores.exact_match ? "Pass" : "Fail"}</b>
+                          <span>
+                            {pct(r.scores.retrieval_recall as number | null)}
+                          </span>
+                          <span>{num(r.latency_ms, " ms")}</span>
+                          <ChevronRight aria-hidden="true" size={15} />
+                        </button>
+                      ))}
+                      {!shown.length && (
+                        <p className="no-results">
+                          No cases match this view. Try all cases or clear your
+                          search.
+                        </p>
+                      )}
+                    </div>
+                  </section>
+                  <p className="footnote">
+                    {run?.provider === "reference"
+                      ? "Reference mode uses an extractive adapter, not an LLM."
+                      : "Live mode sends the fictional corpus and questions to OpenAI."}{" "}
+                    Human review is recorded separately from automated metrics.
+                  </p>
+                </>
+              )}
+            </>
+          )}
+          {page === "dataset" && (
+            <>
+              <div className="datasetstrip">
+                <div>
+                  <strong>50</strong>
+                  <span>Annotated questions</span>
+                </div>
+                <div>
+                  <strong>30 / 20</strong>
+                  <span>Development / holdout</span>
+                </div>
+                <div>
+                  <strong>5</strong>
+                  <span>Fictional policy documents</span>
+                </div>
+              </div>
+              <p className="footnote">
+                References were authored from the fictional source passages. No
+                employer, customer, or personal data. The holdout was reserved
+                before the first recorded comparison; repeated exploration can
+                invalidate that separation.
+              </p>
+              <div className="panel dataset-list">
+                {cases.map((c) => (
+                  <details key={c.id}>
+                    <summary>
+                      <span className="small">
+                        {c.id} · {c.split}
+                      </span>
+                      {c.question}
+                    </summary>
+                    <p>{c.expected_answer}</p>
+                    <code>
+                      Expected sources:{" "}
+                      {c.expected_sources.join(", ") || "None · abstain"}
+                    </code>
+                  </details>
+                ))}
+              </div>
+            </>
+          )}
+          {page === "history" && (
+            <section className="panel history">
+              <div className="sectionhead">
+                <h2>Recorded comparisons</h2>
+                <span>{runs.length} experiments</span>
+              </div>
+              {runs.map((r) => (
+                <button key={r.id} onClick={() => choose(r.id)}>
+                  <div>
+                    <strong>{r.name}</strong>
+                    <span>
+                      {new Date(r.created_at).toLocaleString()} · {r.provider} ·{" "}
+                      {r.split}
+                    </span>
+                  </div>
+                  <span>{r.status}</span>
+                  <ChevronRight aria-hidden="true" size={16} />
+                </button>
+              ))}
+              {!runs.length && (
+                <p>No comparisons yet. Create one to start the history.</p>
+              )}
+            </section>
+          )}
+        </main>
+        <footer>
+          <span>AI Evaluation Studio</span>
+          <span>Versioned data. Inspectable evidence.</span>
+        </footer>
+      </div>
+      <dialog ref={configDialog} className="config-dialog">
+        <form onSubmit={start}>
+          <div className="dialoghead">
+            <h2>New comparison</h2>
+            <button
+              type="button"
+              aria-label="Close configuration"
+              onClick={() => configDialog.current?.close()}
+            >
+              <X aria-hidden="true" />
+            </button>
+          </div>
+          <label>
+            Experiment name
+            <input
+              required
+              maxLength={80}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+          <div className="formgrid">
+            <label>
+              Dataset split
+              <select value={split} onChange={(e) => setSplit(e.target.value)}>
+                <option value="development">Development · 30 cases</option>
+                <option value="holdout">Holdout · 20 cases</option>
+              </select>
+            </label>
+            <label>
+              Answer adapter
+              <select
+                value={provider}
+                onChange={(e) => setProvider(e.target.value)}
+              >
+                <option value="reference">Local extractive reference</option>
+                <option
+                  value="openai"
+                  disabled={!health.live_inference_enabled}
+                >
+                  OpenAI{" "}
+                  {health.live_inference_enabled ? "" : "(not configured)"}
+                </option>
+              </select>
+            </label>
+          </div>
+          <p className="caption">
+            {provider === "reference"
+              ? "No model calls or API charges. Measures retrieval and strict reference matching."
+              : "Live run makes up to 100 billable API requests. Text is sent to OpenAI. Costs require rates configured on the backend."}
+          </p>
+          <div className="formgrid">
+            {(["baseline", "candidate"] as const).map((key) => (
+              <fieldset key={key}>
+                <legend>{key === "baseline" ? "Baseline" : "Candidate"}</legend>
+                <label>
+                  Retrieval
+                  <select
+                    value={configs[key].retriever}
+                    onChange={(e) =>
+                      setConfigs({
+                        ...configs,
+                        [key]: {
+                          ...configs[key],
+                          retriever: e.target.value,
+                          name:
+                            e.target.value === "bm25"
+                              ? "BM25 retrieval"
+                              : "Token overlap",
+                        },
+                      })
+                    }
+                  >
+                    <option value="overlap">Token overlap</option>
+                    <option value="bm25">BM25</option>
+                  </select>
+                </label>
+                <label>
+                  Passages retrieved
+                  <input
+                    type="number"
+                    min={1}
+                    max={5}
+                    required
+                    value={configs[key].top_k}
+                    onChange={(e) =>
+                      setConfigs({
+                        ...configs,
+                        [key]: {
+                          ...configs[key],
+                          top_k: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Abstention threshold
+                  <input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    required
+                    value={configs[key].threshold}
+                    onChange={(e) =>
+                      setConfigs({
+                        ...configs,
+                        [key]: {
+                          ...configs[key],
+                          threshold: Number(e.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+              </fieldset>
+            ))}
+          </div>
+          <p className="caption">
+            Overlap and BM25 scores have different scales. Thresholds belong to
+            each retriever. The release gate detects regressions, not
+            statistical significance.
+          </p>
+          {error && (
+            <p role="alert" className="error">
+              {error}
+            </p>
+          )}
+          <button className="primary runsubmit" disabled={busy}>
+            <Play aria-hidden="true" size={14} />
+            {busy ? "Starting…" : "Run comparison"}
+          </button>
+        </form>
+      </dialog>
+      <dialog className="detail-dialog" ref={detailDialog}>
+        {selected && (
+          <>
+            <div className="dialoghead">
+              <button
+                aria-label="Close case details"
+                onClick={() => detailDialog.current?.close()}
+              >
+                <ArrowLeft aria-hidden="true" size={16} />
+                Back to experiment
+              </button>
+              <span className="small">
+                {selected.case_id} · {selected.category}
+              </span>
+            </div>
+            <h2>{selected.question}</h2>
+            <div className="answergrid">
+              <section>
+                <span className="small">Expected answer</span>
+                <p>{selected.expected_answer}</p>
+                <code>
+                  {selected.expected_sources.join(", ") || "No source expected"}
+                </code>
+              </section>
+              <section>
+                <span className="small">Candidate answer</span>
+                <p>
+                  {selected.output?.answer ||
+                    `Provider error: ${selected.error}`}
+                </p>
+                <code>
+                  Citations: {selected.output?.citations.join(", ") || "None"}
+                </code>
+              </section>
+            </div>
+            <h3>Retrieved evidence</h3>
+            {selected.retrieved.map((p) => (
+              <section className="passage" key={p.id}>
+                <div>
+                  <strong>{p.document}</strong>
+                  <span>
+                    Page {p.page} · {p.id} · score {p.score.toFixed(3)}
+                  </span>
+                </div>
+                <p>{p.text}</p>
+              </section>
+            ))}
+            {!selected.retrieved.length && (
+              <p>No passages passed the retrieval threshold.</p>
+            )}
+            <form onSubmit={review} className="reviewform">
+              <h3>Human review</h3>
+              <p className="caption">
+                This annotation does not overwrite the automated score.
+              </p>
+              <label>
+                Verdict
+                <select
+                  value={verdict}
+                  onChange={(e) => setVerdict(e.target.value)}
+                >
+                  <option value="needs review">Needs review</option>
+                  <option value="correct">Correct</option>
+                  <option value="incorrect">Incorrect</option>
+                </select>
+              </label>
+              <label>
+                Review note
+                <textarea
+                  maxLength={2000}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="What did the automated check miss?"
+                />
+              </label>
+              <button type="submit">Save review</button>
+              <p role="status">{message}</p>
+            </form>
+          </>
+        )}
+      </dialog>
+      <dialog ref={tokenDialog} className="token-dialog">
+        <div className="dialoghead">
+          <h2>Connection settings</h2>
+          <button
+            aria-label="Close connection settings"
+            onClick={() => tokenDialog.current?.close()}
+          >
+            <X aria-hidden="true" />
+          </button>
+        </div>
+        <p>
+          For a token protected backend, enter the studio access token. Never
+          enter an OpenAI key here. This value stays in this browser tab’s
+          memory.
+        </p>
+        <label>
+          Studio access token
+          <input
+            type="password"
+            autoComplete="off"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+          />
+        </label>
+        <button onClick={() => tokenDialog.current?.close()}>Done</button>
+      </dialog>
+    </>
+  );
+}
+createRoot(document.getElementById("root")!).render(<App />);
